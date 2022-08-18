@@ -1,0 +1,158 @@
+;*************************************************************************************************************************************
+;														"SHRI"  
+;ADC and Serial data transfer 
+; ************************************************************************************************************************************
+.LISTMAC 
+;*************************************************************************************************************************************
+.def	Temp1	= R16 		; Temperary Data storage 1
+.def	Temp2	= R23		; Temperary Data storage 2
+.def	Temp3	= R24
+.def	adc_h	= R17		; adc lower bits
+.def	fbin	= R17		; 8-bit binary value of ADC equivalant
+.def	tBCDL	= R17		; BCD result MSD
+.def	tBCDH	= R18		; BCD result LSD
+;*************************************************************************************************************************************
+.include   "m32Adef.inc"
+;*************************************************************************************************************************************
+.cseg					;CODE segment
+.org 0
+	jmp		Start					 	;1 $000(1) RESET External Pin, Power-on Reset, Brown-out
+;***********************************************************************************************************************************
+; Mains Program starts here.
+;***********************************************************************************************************************************
+Start:
+        ldi    Temp1,high(RAMEND)    			; Main program start
+        out    SPH,Temp1             			; Set Stack Pointer to top of RAM
+	ldi    Temp1,low(RAMEND)
+	out    SPL,Temp1
+        sei        
+PrtA:
+	ldi		Temp1,0b00000000				; Input port for ADC 
+	out		Porta,Temp1
+	ldi		Temp1,0b00000000 				; Input Port for ADC
+	out		DDRA,Temp1						; 
+;***********************************************************************************************************************************
+; Initialise the ADC to read the Temperature Sensor 
+.equ	Temperature_Sensor	= 0b11100000
+;***********************************************************************************************************************************
+ADC_EN:
+	ldi	Temp1,Temperature_Sensor        ; Select Channel 0 (PA0)  
+	out     ADMUX,Temp1                		; Select AREF  as Voltage Reference.
+
+	ldi     Temp1,0b10000111				; ADC Enabled, Interrupt Disabled, 
+	out     ADCSR,Temp1		 	        	; Prescalar of 128 to give ADC Clock of 125KHZ at 16MHz.
+;********************************************************************************************************************************
+; USART initialisation: 
+; RXCIE interrupt disable and Receiver disable.
+; UCSRC: asynchronous mode,1 stop bits.character size : 8 bit, No Parity 
+.equ	Baud			 = 103		; @16Mhz, Baud rate of 9600 for Serial transmission as well as FD
+;********************************************************************************************************************************
+Usart_00:
+		clr		Temp2
+		ldi		Temp1,BAUD						; Baud rate of 9600 for  16 MHz
+		out		UBRRL,Temp1						; Set baud rate generator for Transmisssion
+		out		UBRRH,Temp2
+		
+		ldi		Temp1,0b10000110				; Asynchronous USART,Parity None,1 stop bits, 8 bit,clock polaroty 0
+		out		UCSRC,Temp1
+
+		ldi		Temp1,0b00001000				; Transmitter enabled 
+		out		UCSRB,Temp1						; 
+
+		rcall	Delay_00
+;********************************************************************************************************************************
+; Read the Temperature
+;********************************************************************************************************************************
+Read_00:
+		ldi	Temp1,Temperature_Sensor 
+		out     ADMUX,Temp1			      		; Select channel i.e channel 0
+Read_01:
+		rcall	ADC_00							; Start the Conversion and return after complitation
+		
+Read_02:
+		in      Adc_H,adch						; Read MSB
+;***********************************************************************************************************************************
+; Convert the Hex data to Binary
+;***********************************************************************************************************************************
+Convert_00:
+		rcall	bin2bcd8_0
+;***********************************************************************************************************************************
+; Transfer_00:
+;***********************************************************************************************************************************
+Transfer_00:
+		rcall	Transmit_00
+
+		rcall	Delay_00
+		
+
+		rjmp	Read_00
+;***********************************************************************************************************************************
+; ADC_00: Get the Digital Equivalant:  
+;***********************************************************************************************************************************
+ADC_00:
+		sbi		ADCSR,ADSC					; start of conversion
+ADC_01:
+		sbis	ADCSR,ADIF
+		brne	ADC_01						; Check for conversion complete
+		
+		sbi		ADCSR,ADIF					; flag rest
+		ret
+;*************************************************************************************************************************************
+; BCD to Binary Converter: No is returened in Temps
+.def	fbin	=r17		;8-bit binary value
+.def	tBCDL	=r17		;BCD result MSD
+.def	tBCDH	=r18		;BCD result LSD
+;*************************************************************************************************************************************
+;hex to binary conversion
+bin2bcd8_0:
+		clr		tBCDH					;clear result MSD
+bin2bcd8_1:
+	subi	fbin,10					;input = input - 10
+        brcs	bin2bcd8_2				;abort if carry set
+      	inc	tBCDH					;inc MSD
+	rjmp	bin2bcd8_1				;loop again
+bin2bcd8_2:
+		subi	fbin,-10				;compensate extra subtraction
+		ori		tBCDL,$30
+		ori		tBCDH,$30				; ASCII 
+		ret
+;*************************************************************************************************************************************
+;Transmit_00:Transmit the BCD byte
+;*************************************************************************************************************************************
+Transmit_00:
+Trans_Msb:
+		sbis	UCSRA,UDRE					;is UART transmitter ready?		
+		rjmp	Trans_Msb
+		out		UDR,tBCDH					; 
+
+Trans_Lsb:
+		sbis	UCSRA,UDRE					;is UART transmitter ready?		
+		rjmp	Trans_Lsb
+		out		UDR,tBCDL					; 
+Transmit_01:
+		ret
+;*************************************************************************************************************************************
+; Delay_00:
+;*************************************************************************************************************************************
+Delay_00:
+	ldi		Temp1,250
+
+Delay_01:
+	ldi		Temp2,250
+
+Delay_02:
+	ldi		Temp3,250
+
+Delay_03:
+   dec		Temp3
+   brne	    Delay_03
+   
+Delay_04:
+	dec		Temp2
+	brne	Delay_02
+
+Delay_03:
+	dec		Temp1
+	brne	Delay_01
+
+	ret
